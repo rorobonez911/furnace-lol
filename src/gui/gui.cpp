@@ -83,8 +83,7 @@ bool Particle::update(float frameTime) {
 void FurnaceGUI::centerNextWindow(const char* name, float w, float h) {
   if (ImGui::IsPopupOpen(name)) {
     if (settings.centerPopup) {
-      ImGuiViewport* mvp=ImGui::GetMainViewport();
-      ImGui::SetNextWindowPos(ImVec2(mvp->Pos.x+w*0.5f,mvp->Pos.y+h*0.5f),ImGuiCond_Always,ImVec2(0.5f,0.5f));
+      ImGui::SetNextWindowPos(ImVec2(w*0.5,h*0.5),ImGuiCond_Always,ImVec2(0.5,0.5));
     }
   }
 }
@@ -3238,10 +3237,10 @@ float guiFxCurve(float t, float tension) {
           if ((int)round(x-macroDragLineInitial.x)<0) { \
             float span=(float)(macroDragLineInitial.x-x); \
             for (int i=0; i<=(int)round(span); i++) { \
-              int index=(int)round(x+i); \
+              int index=(int)round(macroDragLineInitial.x-i); \
               if (index<0) continue; \
               float cv=guiFxCurve((float)i/span,macroDragSlopeTension); \
-              t[index]=B30(t[index])^(int)(y+(macroDragLineInitial.y-y)*cv); \
+              t[index]=B30(t[index])^(int)(macroDragLineInitial.y+(y-macroDragLineInitial.y)*cv); \
             } \
           } else { \
             float span=(float)(x-macroDragLineInitial.x); \
@@ -3402,7 +3401,7 @@ void FurnaceGUI::editOptions(bool topMenu) {
 
   if (ImGui::MenuItem(_("cut"),BIND_FOR(GUI_ACTION_PAT_CUT))) doCopy(true,true,selStart,selEnd);
   if (ImGui::MenuItem(_("copy"),BIND_FOR(GUI_ACTION_PAT_COPY))) doCopy(false,true,selStart,selEnd);
-  if (ImGui::MenuItem(_("paste"),BIND_FOR(GUI_ACTION_PAT_PASTE))) doPaste(GUI_PASTE_MODE_OVERFLOW);
+  if (ImGui::MenuItem(_("paste"),BIND_FOR(GUI_ACTION_PAT_PASTE))) doPaste();
   if (ImGui::BeginMenu(_("paste special..."))) {
     if (ImGui::MenuItem(_("paste mix"),BIND_FOR(GUI_ACTION_PAT_PASTE_MIX))) doPaste(GUI_PASTE_MODE_MIX_FG);
     if (ImGui::MenuItem(_("paste mix (background)"),BIND_FOR(GUI_ACTION_PAT_PASTE_MIX_BG))) doPaste(GUI_PASTE_MODE_MIX_BG);
@@ -4417,7 +4416,7 @@ bool FurnaceGUI::loop() {
         }
 #endif
         case SDL_KEYDOWN:
-          if ((!ImGui::GetIO().WantCaptureKeyboard || (newFilePicker->isOpened() && !ImGui::GetIO().WantTextInput)) && !browserFocused) {
+          if (!ImGui::GetIO().WantCaptureKeyboard || (newFilePicker->isOpened() && !ImGui::GetIO().WantTextInput)) {
             keyDown(ev);
           }
           if (introPos<11.0 && !shortIntro) {
@@ -4432,7 +4431,8 @@ bool FurnaceGUI::loop() {
 #endif
           break;
         case SDL_KEYUP:
-          if ((!ImGui::GetIO().WantCaptureKeyboard || (newFilePicker->isOpened() && !ImGui::GetIO().WantTextInput)) && !browserFocused) {
+          // for now
+          if (!ImGui::GetIO().WantCaptureKeyboard || (newFilePicker->isOpened() && !ImGui::GetIO().WantTextInput)) {
             keyUp(ev);
           }
           insEditMayBeDirty=true;
@@ -4925,7 +4925,8 @@ bool FurnaceGUI::loop() {
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
-    // one second counter
+    if (rgbSync) applyRGBSync();
+
     secondTimer+=ImGui::GetIO().DeltaTime;
     if (secondTimer>=1.0f) secondTimer=fmod(secondTimer,1.0f);
 
@@ -4958,8 +4959,6 @@ bool FurnaceGUI::loop() {
         if (!isPatUnique) break;
       }
     }
-
-    if (rgbSync) applyRGBSync();
 
     if (!mobileUI) {
       ImGui::BeginMainMenuBar();
@@ -5283,8 +5282,6 @@ bool FurnaceGUI::loop() {
         if (ImGui::MenuItem(_("play/edit controls"),BIND_FOR(GUI_ACTION_WINDOW_EDIT_CONTROLS),editControlsOpen)) editControlsOpen=!editControlsOpen;
         if (ImGui::MenuItem(_("piano/input pad"),BIND_FOR(GUI_ACTION_WINDOW_PIANO),pianoOpen)) pianoOpen=!pianoOpen;
         if (ImGui::MenuItem(_("piano roll"),NULL,pianoRollOpen)) pianoRollOpen=!pianoRollOpen;
-        if (ImGui::MenuItem(_("browser"),NULL,browserOpen)) browserOpen=!browserOpen;
-        if (ImGui::MenuItem(_("projectm"),NULL,visualizerOpen)) visualizerOpen=!visualizerOpen;
         if (ImGui::MenuItem(_("reference music player"),BIND_FOR(GUI_ACTION_WINDOW_REF_PLAYER),refPlayerOpen)) refPlayerOpen=!refPlayerOpen;
         if (ImGui::MenuItem(_("multi-ins setup"),BIND_FOR(GUI_ACTION_WINDOW_MULTI_INS_SETUP),multiInsSetupOpen)) multiInsSetupOpen=!multiInsSetupOpen;
         if (spoilerOpen) if (ImGui::MenuItem(_("spoiler"),NULL,spoilerOpen)) spoilerOpen=!spoilerOpen;
@@ -5503,9 +5500,6 @@ bool FurnaceGUI::loop() {
       MEASURE(refPlayer,drawRefPlayer());
       MEASURE(multiInsSetup,drawMultiInsSetup());
       MEASURE(pianoRoll,drawPianoRoll());
-      drawBrowser();
-      drawVisualizer();
-      updateDiscordPresence();
       MEASURE(patManager,drawPatManager());
       MEASURE(tuner,drawTuner());
       MEASURE(spectrum,drawSpectrum());
@@ -5557,9 +5551,6 @@ bool FurnaceGUI::loop() {
       MEASURE(refPlayer,drawRefPlayer());
       MEASURE(multiInsSetup,drawMultiInsSetup());
       MEASURE(pianoRoll,drawPianoRoll());
-      drawBrowser();
-      drawVisualizer();
-      updateDiscordPresence();
 
     }
 
@@ -5608,9 +5599,8 @@ bool FurnaceGUI::loop() {
       if (!fileDialog->isOpen()) {
         ImGui::CloseCurrentPopup();
       }
-      ImGuiViewport* mvp=ImGui::GetMainViewport();
-      ImDrawList* dl=ImGui::GetForegroundDrawList(mvp);
-      dl->AddRectFilled(mvp->Pos,ImVec2(mvp->Pos.x+canvasW,mvp->Pos.y+canvasH),ImGui::ColorConvertFloat4ToU32(uiColors[GUI_COLOR_MODAL_BACKDROP]));
+      ImDrawList* dl=ImGui::GetForegroundDrawList();
+      dl->AddRectFilled(ImVec2(0.0f,0.0f),ImVec2(canvasW,canvasH),ImGui::ColorConvertFloat4ToU32(uiColors[GUI_COLOR_MODAL_BACKDROP]));
       ImGui::EndPopup();
     }
 #endif
@@ -6745,8 +6735,7 @@ bool FurnaceGUI::loop() {
     ImVec2 newSongMaxSize=ImVec2(canvasW-((mobileUI && !portrait)?(60.0*dpiScale):0),canvasH-(mobileUI?(60.0*dpiScale):0));
     ImGui::SetNextWindowSizeConstraints(newSongMinSize,newSongMaxSize);
     if (ImGui::BeginPopupModal(_("New Song"),NULL,ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoScrollWithMouse|ImGuiWindowFlags_NoScrollbar)) {
-      ImGuiViewport* mvp=ImGui::GetMainViewport();
-      ImGui::SetWindowPos(ImVec2(mvp->Pos.x+((canvasW)-ImGui::GetWindowSize().x)*0.5f,mvp->Pos.y+((canvasH)-ImGui::GetWindowSize().y)*0.5f));
+      ImGui::SetWindowPos(ImVec2(((canvasW)-ImGui::GetWindowSize().x)*0.5,((canvasH)-ImGui::GetWindowSize().y)*0.5));
       if (ImGui::GetWindowSize().x<newSongMinSize.x || ImGui::GetWindowSize().y<newSongMinSize.y) {
         ImGui::SetWindowSize(newSongMinSize,ImGuiCond_Always);
       }
@@ -6755,10 +6744,7 @@ bool FurnaceGUI::loop() {
     }
 
     ImVec2 wsize=ImVec2(canvasW*0.9,canvasH*0.4);
-    {
-      ImGuiViewport* mvp=ImGui::GetMainViewport();
-      ImGui::SetNextWindowPos(ImVec2(mvp->Pos.x+(canvasW-wsize.x)*0.5f,mvp->Pos.y+50*dpiScale));
-    }
+    ImGui::SetNextWindowPos(ImVec2((canvasW-wsize.x)*0.5,50*dpiScale));
     ImGui::SetNextWindowSize(wsize,ImGuiCond_Always);
     if (ImGui::BeginPopup(_("Command Palette"),ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings)) {
       drawPalette();
@@ -6766,8 +6752,7 @@ bool FurnaceGUI::loop() {
     }
 
     if (ImGui::BeginPopupModal(_("Export"),NULL,ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoScrollWithMouse|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_AlwaysAutoResize)) {
-      ImGuiViewport* mvp2=ImGui::GetMainViewport();
-      ImGui::SetWindowPos(ImVec2(mvp2->Pos.x+((canvasW)-ImGui::GetWindowSize().x)*0.5f,mvp2->Pos.y+((canvasH)-ImGui::GetWindowSize().y)*0.5f));
+      ImGui::SetWindowPos(ImVec2(((canvasW)-ImGui::GetWindowSize().x)*0.5,((canvasH)-ImGui::GetWindowSize().y)*0.5));
       drawExport();
       ImGui::EndPopup();
     }
@@ -7469,26 +7454,28 @@ bool FurnaceGUI::loop() {
     }
 #endif
 
+#ifdef DIV_UNSTABLE
     {
-      ImGuiViewport* mvp=ImGui::GetMainViewport();
-      ImDrawList* dl=ImGui::GetForegroundDrawList(mvp);
-      ImVec2 markPos=ImVec2(mvp->Pos.x+canvasW-ImGui::CalcTextSize(DIV_VERSION).x-6.0*dpiScale,mvp->Pos.y+4.0*dpiScale);
+      ImDrawList* dl=ImGui::GetForegroundDrawList();
+      ImVec2 markPos=ImVec2(canvasW-ImGui::CalcTextSize(DIV_VERSION).x-6.0*dpiScale,4.0*dpiScale);
       ImVec4 markColor=uiColors[GUI_COLOR_TEXT];
       markColor.w=0.67f;
 
       dl->AddText(markPos,ImGui::ColorConvertFloat4ToU32(markColor),DIV_VERSION);
     }
+#endif
 
     if (settings.displayRenderTime) {
       String renderTime=fmt::sprintf("%.0fµs",ImGui::GetIO().DeltaTime*1000000.0);
       String renderTime2=fmt::sprintf("%.1f FPS",1.0/ImGui::GetIO().DeltaTime);
-      ImGuiViewport* mvp=ImGui::GetMainViewport();
-      ImDrawList* dl=ImGui::GetForegroundDrawList(mvp);
-      ImVec2 markPos=ImVec2(mvp->Pos.x+canvasW-ImGui::CalcTextSize(renderTime.c_str()).x-60.0*dpiScale,mvp->Pos.y+4.0*dpiScale);
-      ImVec2 markPos2=ImVec2(mvp->Pos.x+canvasW-ImGui::CalcTextSize(renderTime2.c_str()).x-160.0*dpiScale,mvp->Pos.y+4.0*dpiScale);
+      ImDrawList* dl=ImGui::GetForegroundDrawList();
+      ImVec2 markPos=ImVec2(canvasW-ImGui::CalcTextSize(renderTime.c_str()).x-60.0*dpiScale,4.0*dpiScale);
+      ImVec2 markPos2=ImVec2(canvasW-ImGui::CalcTextSize(renderTime2.c_str()).x-160.0*dpiScale,4.0*dpiScale);
 
       dl->AddText(markPos,0xffffffff,renderTime.c_str());
       dl->AddText(markPos2,0xffffffff,renderTime2.c_str());
+
+      //logV("%s (%s)",renderTime,renderTime2);
     }
 
     layoutTimeEnd=SDL_GetPerformanceCounter();
@@ -8204,8 +8191,6 @@ bool FurnaceGUI::init() {
 
   applyUISettings();
 
-  if (settings.discordEnabled) initDiscord();
-
   logD("building font...");
   if (rend->areTexturesSquare()) {
     ImGui::GetIO().Fonts->Flags|=ImFontAtlasFlags_Square;
@@ -8220,7 +8205,7 @@ bool FurnaceGUI::init() {
   backupPath+=String(BACKUPS_DIR);
   prepareLayout();
 
-  ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_DockingEnable|ImGuiConfigFlags_ViewportsEnable;
+  ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_DockingEnable;
   //ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard;
   //ImGui::GetIO().ConfigFlags&=~ImGuiConfigFlags_NavCaptureKeyboard;
   toggleMobileUI(mobileUI,true);
@@ -8530,17 +8515,6 @@ void FurnaceGUI::syncState() {
   spectrum.xOffset=e->getConfFloat("spectrumxOffset",0);
   spectrum.yOffset=e->getConfFloat("spectrumyOffset",0);
   spectrum.mono=e->getConfBool("spectrumMono",false);
-  spectrum.fallSpeed=e->getConfFloat("spectrumFallSpeed",0.92f);
-  spectrum.peakDecay=e->getConfFloat("spectrumPeakDecay",0.995f);
-  spectrum.fillAlpha=e->getConfFloat("spectrumFillAlpha",0.35f);
-  spectrum.slope=e->getConfFloat("spectrumSlope",0.0f);
-  spectrum.noiseFloor=e->getConfFloat("spectrumNoiseFloor",1.0f);
-  spectrum.peakDotSize=e->getConfFloat("spectrumPeakDotSize",2.5f);
-  spectrum.peakThreshold=e->getConfFloat("spectrumPeakThreshold",0.65f);
-  spectrum.peakMinGap=e->getConfFloat("spectrumPeakMinGap",0.012f);
-  spectrum.showPeakLabels=e->getConfBool("spectrumShowPeakLabels",false);
-  spectrum.gradientFill=e->getConfBool("spectrumGradientFill",true);
-  spectrum.peakLabelMode=e->getConfInt("spectrumPeakLabelMode",0);
 
   pianoOctaves=e->getConfInt("pianoOctaves",pianoOctaves);
   pianoOctavesEdit=e->getConfInt("pianoOctavesEdit",pianoOctavesEdit);
@@ -8721,17 +8695,6 @@ void FurnaceGUI::commitState(DivConfig& conf) {
   conf.set("spectrumxOffset",spectrum.xOffset);
   conf.set("spectrumyOffset",spectrum.yOffset);
   conf.set("spectrumMono",spectrum.mono);
-  conf.set("spectrumFallSpeed",spectrum.fallSpeed);
-  conf.set("spectrumPeakDecay",spectrum.peakDecay);
-  conf.set("spectrumFillAlpha",spectrum.fillAlpha);
-  conf.set("spectrumSlope",spectrum.slope);
-  conf.set("spectrumNoiseFloor",spectrum.noiseFloor);
-  conf.set("spectrumPeakDotSize",spectrum.peakDotSize);
-  conf.set("spectrumPeakThreshold",spectrum.peakThreshold);
-  conf.set("spectrumPeakMinGap",spectrum.peakMinGap);
-  conf.set("spectrumShowPeakLabels",spectrum.showPeakLabels);
-  conf.set("spectrumGradientFill",spectrum.gradientFill);
-  conf.set("spectrumPeakLabelMode",spectrum.peakLabelMode);
 
   // commit piano state
   conf.set("pianoOctaves",pianoOctaves);
@@ -8812,7 +8775,6 @@ bool FurnaceGUI::finish(bool saveConfig) {
       e->saveConf();
     }
   }
-  shutdownDiscord();
   rend->quitGUI();
   ImGui_ImplSDL2_Shutdown();
   quitRender();
@@ -8924,6 +8886,7 @@ FurnaceGUI::FurnaceGUI():
   wantCaptureKeyboard(false),
   oldWantCaptureKeyboard(false),
   displayMacroMenu(false),
+  rgbSync(false),
   displayNew(false),
   displayPalette(false),
   fullScreen(false),
@@ -9135,11 +9098,6 @@ FurnaceGUI::FurnaceGUI():
   refPlayerOpen(false),
   multiInsSetupOpen(false),
   pianoRollOpen(false),
-  browserOpen(false),
-  browserFocused(false),
-  visualizerOpen(false),
-  rgbSync(false),
-  browserHistoryPos(-1),
   prChan(0),
   prZoom(1.0f),
   prNoteH(8.0f),
